@@ -1,7 +1,7 @@
 ---
 title: "assignment 3"
 author: "Bill Co"
-date: "2025-02-17"
+date: "2025-03-10"
 output: html_document
 ---
 
@@ -16,6 +16,8 @@ library(tidyverse)
 library(caret)
 
 library(tree)
+
+library(rpart)
 ```
 
 # Settings
@@ -111,12 +113,13 @@ for (drug.id in 1:5) {
     
     #This metric matrix will be refreshed after every simulation
     
-    metric.base <- matrix(0, nrow = 4, ncol = 5)
+    metric.base <- matrix(0, nrow = 5, ncol = 5)
     
     lda.success <- 5
     logistic.success <- 5
     elastic.success <- 5
     tree.success <- 5
+    forest.success <- 5
     
     
     for (test.id in 1:5) {
@@ -184,8 +187,10 @@ for (drug.id in 1:5) {
           elastic.success <- elastic.success - 1
         }
     
-      #4. Trees
+      #Dataframe for tree based
       XXX <- cbind(y.train, as.data.frame(X.train))
+      
+      #4. Trees
       
       fitted.tree <- tree(y.train ~ ., data=XXX)
       
@@ -201,6 +206,19 @@ for (drug.id in 1:5) {
       
       metric.base[4, ] <- metric.base[4, ] + tree.metrics
 
+    
+      
+      
+      #5. Random Forest
+      
+      forest <- rpart(y.train ~ ., data = XXX, method = "class")
+      
+      predictions <- predict(forest, as.data.frame(X.test))
+      
+      forest.metrics <- confusion.metrics(predictions[,2] > .5, y.test)
+      
+      metric.base[5, ] <- metric.base[5, ] + forest.metrics
+
     }
     
     
@@ -211,6 +229,7 @@ for (drug.id in 1:5) {
     metric.base[2,] <- metric.base[2,] / lda.success #Divided by successful n folds
     metric.base[3,] <- metric.base[3,] / elastic.success #Divided by successful n folds
     metric.base[4,] <- metric.base[4,] / tree.success
+    metric.base[5,] <- metric.base[5,] / forest.success
   
   
     
@@ -220,6 +239,7 @@ for (drug.id in 1:5) {
     lda.performances[metric.id, performance.id : (performance.id + 4)] <- metric.base[2, ]
     elastic.performances[metric.id, performance.id : (performance.id + 4)] <- metric.base[3, ]
     tree.performances[metric.id, performance.id : (performance.id + 4)] <- metric.base[4, ]
+    forest.performances[metric.id, performance.id : (performance.id + 4)] <- metric.base[5, ]
     
     metric.id <- metric.id + 1
   }
@@ -228,7 +248,6 @@ for (drug.id in 1:5) {
   
 }
 ```
-
 
 
 #We have to write a another loop for the MTPS because it requires more than 1 class at fitting.
@@ -289,10 +308,11 @@ all.metric <- function(metric, drug) {
            lda.performances[,metric + (drug-1) * 5],
            elastic.performances[,metric + (drug-1) * 5],
            tree.performances[,metric + (drug-1) * 5],
-           mtps.performances[,metric + (drug-1) * 5]),
-           ncol=5)
+           mtps.performances[,metric + (drug-1) * 5],
+           forest.performances[,metric + (drug-1) * 5]),
+           ncol=6)
   
-  colnames(m) <- c("Logist.", "LDA", "Elastic", "Tree", "MTPS")
+  colnames(m) <- c("Logist.", "LDA", "Elastic", "Tree", "MTPS", "Forest")
   
   m
 }
@@ -306,7 +326,8 @@ metric.names <- c("Accuracy", "Mcr", "Precision", "Recall", "F1-Score")
 #1. Box plot of metrics for each drug
 
 ## a. Drug ABC
-```{r}
+
+```{r fig.height=5, fig.width=15}
 cur.drug = 1
 
 par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
@@ -317,11 +338,11 @@ for (i in 3:5) {
   
   boxplot(x, ylab = metric.names[i],
             main = paste(metric.names[i]," for drug", drug.names[cur.drug]),
-            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow", "orange", "grey"))
 }
 ```
 ## b. Drug 3TC
-```{r}
+```{r fig.height=5, fig.width=15}
 cur.drug = 2
 
 par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
@@ -332,14 +353,13 @@ for (i in 3:5) {
   
   boxplot(x, ylab = metric.names[i],
             main = paste(metric.names[i]," for drug", drug.names[cur.drug]),
-            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow", "orange", "grey"))
 }
-
 ```
 
 ## c. Drug AZT
 
-```{r}
+```{r fig.height=5, fig.width=15}
 cur.drug = 3
 
 par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
@@ -350,13 +370,13 @@ for (i in 3:5) {
   
   boxplot(x, ylab = metric.names[i],
             main = paste(metric.names[i]," for drug", drug.names[cur.drug]),
-            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow", "orange", "grey"))
 }
 ```
 
 # Drug D4T
 
-```{r}
+```{r fig.height=5, fig.width=15}
 cur.drug = 4
 
 par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
@@ -367,13 +387,12 @@ for (i in 3:5) {
   
   boxplot(x, ylab = metric.names[i],
             main = paste(metric.names[i]," for drug", drug.names[cur.drug]),
-            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow", "orange", "grey"))
 }
-
 ```
 
 # Drug DDI
-```{r}
+```{r fig.height=5, fig.width=15}
 cur.drug = 5
 
 par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
@@ -384,9 +403,8 @@ for (i in 3:5) {
   
   boxplot(x, ylab = metric.names[i],
             main = paste(metric.names[i]," for drug", drug.names[cur.drug]),
-            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow", "orange", "grey"))
 }
-
 ```
 
 #2. Box plot of metrics for all drugs combined
@@ -399,6 +417,10 @@ group.lda.performance <- sapply(1:5, function(i) rowSums(lda.performances[, seq(
 group.elastic.performance <- sapply(1:5, function(i) rowSums(elastic.performances[, seq(i, 25, by = 5)])) / 5
 
 group.tree.performance <- sapply(1:5, function(i) rowSums(tree.performances[, seq(i, 25, by = 5)])) / 5
+
+group.forest.performance <- sapply(1:5, function(i) rowSums(forest.performances[, seq(i, 25, by = 5)])) / 5
+
+group.mtps.performance <- sapply(1:5, function(i) rowSums(mtps.performances[, seq(i, 25, by = 5)])) / 5
 ```
 
 ```{r}
@@ -407,50 +429,52 @@ group.metric <- function(metric) {
   m <- matrix(c(group.logistic.performance[,metric], 
              group.lda.performance[,metric],
              group.elastic.performance[,metric],
-             group.tree.performance[,metric]), 
-             ncol=4)
+             group.tree.performance[,metric],
+             group.mtps.performance[,metric],
+             group.forest.performance[,metric]), 
+             ncol=6)
     
-  colnames(m) <- c("Logist.", "LDA", "Elastic", "Tree")
+  colnames(m) <- c("Logist.", "LDA", "Elastic", "Tree", "MTPS", "Forest")
   
   m
 }
 ```
 
-```{r}
+```{r fig.height=5, fig.width=15}
 par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
 
 for (i in 3:5) {
-  x <- group.metric(1)
+  x <- group.metric(i)
 
 
   boxplot(x, ylab = metric.names[i],
             main = paste("Combined ", metric.names[i]),
-            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow", "orange", "grey"))
 }
 ```
 
 # Hypothesis Testing
 
-We will conduct the Wilcoxon paired test for F1 Scores between LDA and Elastic Nets, Trees
-
+We will conduct the Wilcoxon paired test for Precision between Logistic and Elastic Nets
 ```{r}
-median(group.lda.performance[, 5])
-var(group.lda.performance[, 5])
+median(group.logistic.performance[, 3])
+median(group.elastic.performance[, 3])
+wilcox.test(group.logistic.performance[, 3], group.elastic.performance[, 3], paired = T)
 ```
 
-#Paired with Elastic Nets
+We will conduct the Wilcoxon paired test for Recall between Logistic and Elastic Nets
+
 ```{r}
+median(group.logistic.performance[, 4])
+median(group.elastic.performance[, 4])
+wilcox.test(group.logistic.performance[, 4], group.elastic.performance[, 4], paired = T)
+```
+
+We will conduct the Wilcoxon paired test for F1-Score between Logistic and Elastic Nets
+
+```{r}
+median(group.logistic.performance[, 5])
 median(group.elastic.performance[, 5])
-var(group.elastic.performance[, 5])
-
-wilcox.test(group.lda.performance[, 5], group.elastic.performance[, 5], paired = T)
-```
-
-#Paired with Trees
-```{r}
-median(group.tree.performance[, 5])
-var(group.tree.performance[, 5])
-
-wilcox.test(group.lda.performance[, 5], group.tree.performance[, 5], paired = T)
+wilcox.test(group.logistic.performance[, 5], group.elastic.performance[, 5], paired = T)
 ```
 
