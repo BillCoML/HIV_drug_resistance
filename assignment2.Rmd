@@ -1,0 +1,456 @@
+---
+title: "assignment 3"
+author: "Bill Co"
+date: "2025-02-17"
+output: html_document
+---
+
+#Load the libraries
+```{r}
+library(MTPS)
+
+data(HIV)
+
+library(tidyverse)
+
+library(caret)
+
+library(tree)
+```
+
+# Settings
+```{r}
+set.seed(0)
+
+n.sim = 10
+```
+
+```{r}
+XX <- as.data.frame(XX)
+
+YY <- as.data.frame(YY)
+
+drug.names <- colnames(YY)
+```
+
+## Define binary outcomes based on Cutoffs (provided by the assignment)
+```{r}
+yBin <- as.matrix(YY)
+cutoffs <- c(2,3,3,1.5,1.5) # cutoff value to be used to
+#define drug resistance
+for(ii in 1:5) yBin[,ii] <- (10^yBin[,ii] < cutoffs[ii])*1
+```
+
+#Because resampling with large N can maintain the ratio between classes, so I am going to re-generate this index matrix only once
+#Matrix is (10 x 5) x 1245/5. 
+
+#-> There are 1246 obs but I sacrificed one for an easier matrix creation, so 1245 observations.
+#-> Each of the 10 simulations will have 5 rows for 5 fold CV.
+```{r}
+indices <- matrix(sample(seq(1, 1246), n.sim * 1245, replace = T), nrow = n.sim * 5, ncol = 1245/5)
+dim(indices)
+```
+
+
+```{r}
+confusion.metrics <- function(predictions, actual) {
+  
+  cm <- table(actual, predictions)
+  TN <- cm[1,1]
+  FP <- cm[1,2]
+  FN <- cm[2,1]
+  TP <- cm[2,2]
+  
+  accuracy <- (TN  + TP) / (TN + FN + FP + TP)
+  mcr <- 1 - accuracy
+  precision <- TP / (TP + FP)
+  recall <- TP / (TP + FN)
+  f1 <- (2*TP) / (2*TP + FP + FN)
+  
+  c(accuracy, mcr, precision, recall, f1)
+}
+```
+
+
+
+
+```{r}
+logistic.performances <- matrix(0, nrow=n.sim, ncol=5 * 5)
+lda.performances      <- matrix(0, nrow=n.sim, ncol=5 * 5)
+elastic.performances  <- matrix(0, nrow=n.sim, ncol=5 * 5)
+tree.performances     <- matrix(0, nrow=n.sim, ncol=5 * 5)
+forest.performances   <- matrix(0, nrow=n.sim, ncol=5 * 5)
+  
+#performance .id is the index of column, the way a performance matrix is designed is
+#n rows = n simulations
+#5 groups of cols for 5 drugs, each has 5 cols for 5 metrics (accuracy is not used due to imbalance class), so n.cols in total = 5*5
+
+performance.id <- 1
+  
+for (drug.id in 1:5) {
+  
+  metric.id <- 1
+  
+  #because there are 5 drugs
+  current_outputs <- yBin[,drug.id]
+  
+  #For logistic model, I'll use Lasso (L1) regularization, thus I will find out the best overall lambda before starting simulations
+  
+  cv.logistic <- cv.glmnet(as.matrix(XX), current_outputs, family = 'binomial', alpha = 1)
+  cv.elastic <- cv.glmnet(as.matrix(XX), current_outputs, family = 'binomial', alpha = 0.5)
+  
+  print(paste('Assessing drug: ', drug.names[drug.id]))
+  
+  for (sim in seq(1, 5 * n.sim, 5)) {
+    
+    #because there are 10 simulations,
+    #each with 5 rows(folds), so I extract the sub-matrix for simplicity.
+    
+    cur.sim.indices <- indices[sim: (sim+4), ] 
+    
+    
+    #This metric matrix will be refreshed after every simulation
+    
+    metric.base <- matrix(0, nrow = 4, ncol = 5)
+    
+    lda.success <- 5
+    logistic.success <- 5
+    elastic.success <- 5
+    tree.success <- 5
+    
+    
+    for (test.id in 1:5) {
+    
+      #because there are 5 folds in a Cross Validation
+  
+      X.train <- as.matrix( XX[cur.sim.indices[-test.id, ], ] )
+      X.test  <- as.matrix( XX[cur.sim.indices[ test.id, ], ] )
+      
+      y.train <- current_outputs[cur.sim.indices[-test.id, ]]
+      y.test  <- current_outputs[cur.sim.indices[test.id, ]]
+      
+      
+      ### Put model fittings here
+      
+      #1. Logistic with L1
+      fitted.logistic <- glmnet(X.train, y.train, family = 'binomial', alpha = 1, lambda = cv.logistic$lambda.min)
+      
+      if (fitted.logistic$lambda != Inf) {
+      
+        logistic.probs <- predict(fitted.logistic, newx = X.test, type = 'response')
+        
+        logistic.metrics <- confusion.metrics(logistic.probs > .5, y.test)
+        
+        metric.base[1, ] <- metric.base[1, ] + logistic.metrics
+      }
+      
+      else {
+        
+        logistic.success <- logistic.success - 1
+      }
+      
+      #2. LDA
+      
+      tryCatch({
+          # Fit LDA model
+          fitted.lda <- lda(X.train, y.train)
+          
+          lda.predictions <- predict(fitted.lda, newdata = X.test)
+      
+          lda.metrics <- confusion.metrics(lda.predictions$class, y.test)
+          
+          metric.base[2, ] <- metric.base[2, ] + lda.metrics
+          
+      }, error = function(e) {
+          lda.success <- lda.success - 1
+      })
+     
+      
+      #3. Elastic Net
+      fitted.elastic <- glmnet(X.train, y.train, family = 'binomial', alpha = 0.5, lambda = cv.elastic$lambda.min)
+        
+        if (fitted.elastic$lambda != Inf) {
+        
+          elastic.probs <- predict(fitted.elastic, newx = X.test, type = 'response')
+          
+          elastic.metrics <- confusion.metrics(elastic.probs > .5, y.test)
+          
+          metric.base[3, ] <- metric.base[3, ] + elastic.metrics
+          
+        }
+        
+        else {
+          
+          elastic.success <- elastic.success - 1
+        }
+    
+      #4. Trees
+      XXX <- cbind(y.train, as.data.frame(X.train))
+      
+      fitted.tree <- tree(y.train ~ ., data=XXX)
+      
+      prune <- cv.tree(fitted.tree)
+  
+      best.size <- prune$size[which.min(prune$dev)]
+      
+      fitted.tree <- prune.tree(fitted.tree, best = best.size)
+      
+      y <- predict(fitted.tree, newdata = as.data.frame(X.test))
+      
+      tree.metrics <- confusion.metrics(y > .5, y.test)
+      
+      metric.base[4, ] <- metric.base[4, ] + tree.metrics
+
+    }
+    
+    
+    ### Model performance
+    # Save to matrix
+    ###
+    metric.base[1,] <- metric.base[1,] / logistic.success
+    metric.base[2,] <- metric.base[2,] / lda.success #Divided by successful n folds
+    metric.base[3,] <- metric.base[3,] / elastic.success #Divided by successful n folds
+    metric.base[4,] <- metric.base[4,] / tree.success
+  
+  
+    
+    # Save to simulation metric matrices
+    
+    logistic.performances[metric.id, performance.id : (performance.id + 4)] <- metric.base[1, ]
+    lda.performances[metric.id, performance.id : (performance.id + 4)] <- metric.base[2, ]
+    elastic.performances[metric.id, performance.id : (performance.id + 4)] <- metric.base[3, ]
+    tree.performances[metric.id, performance.id : (performance.id + 4)] <- metric.base[4, ]
+    
+    metric.id <- metric.id + 1
+  }
+  
+  performance.id <- performance.id + 5 #Each performance_id is for each drug
+  
+}
+```
+
+
+
+#We have to write a another loop for the MTPS because it requires more than 1 class at fitting.
+```{r}
+mtps.performances  <-  matrix(0, nrow=n.sim, ncol=5 * 5)
+metric.id <- 1
+
+for (sim in seq(1, 5 * n.sim, 5)) {
+  
+    cur.sim.indices <- indices[sim: (sim+4), ] 
+    
+    #This metric matrix will be refreshed after every simulation
+    
+    for (test.id in 1:5) {
+      
+      performance.id <- 1
+    
+      #because there are 5 folds
+  
+      X.train <- as.matrix( XX[cur.sim.indices[-test.id, ], ] )
+      X.test  <- as.matrix( XX[cur.sim.indices[ test.id, ], ] )
+      
+      y.train <- as.matrix( yBin[cur.sim.indices[-test.id, ], ] )
+      y.test  <- as.matrix( yBin[cur.sim.indices[ test.id, ], ] )
+      
+      #Fit the mtps model
+      fit.rs <- MTPS(xmat = X.train, ymat= y.train, family='binomial', cv=FALSE, residual = TRUE, method.step1 = rpart1, method.step2 = lm1)
+      
+      #Prediction for 5 drugs
+      probs <- predict(fit.rs, X.test, type='response')
+      
+        for (drug in 1:5) { 
+        
+          #Record performances
+          mtps.metrics <- confusion.metrics(probs[,drug] > .5, y.test[,drug])
+          
+          mtps.performances[metric.id, performance.id: (performance.id + 4)] <- mtps.metrics
+          
+          performance.id <- performance.id + 5
+        }
+      
+    }
+  
+    metric.id <- metric.id + 1
+}
+```
+
+
+#Visualization
+
+## Because this data is very class-imbalanced, accuracy can be misleading so I am not including it
+
+
+```{r}
+all.metric <- function(metric, drug) {
+  
+  m <- matrix(c(logistic.performances[,metric + (drug-1) * 5], 
+           lda.performances[,metric + (drug-1) * 5],
+           elastic.performances[,metric + (drug-1) * 5],
+           tree.performances[,metric + (drug-1) * 5],
+           mtps.performances[,metric + (drug-1) * 5]),
+           ncol=5)
+  
+  colnames(m) <- c("Logist.", "LDA", "Elastic", "Tree", "MTPS")
+  
+  m
+}
+```
+
+```{r}
+metric.names <- c("Accuracy", "Mcr", "Precision", "Recall", "F1-Score")
+```
+
+
+#1. Box plot of metrics for each drug
+
+## a. Drug ABC
+```{r}
+cur.drug = 1
+
+par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
+
+for (i in 3:5) { 
+  x <- all.metric(i, cur.drug)
+
+  
+  boxplot(x, ylab = metric.names[i],
+            main = paste(metric.names[i]," for drug", drug.names[cur.drug]),
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+}
+```
+## b. Drug 3TC
+```{r}
+cur.drug = 2
+
+par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
+
+for (i in 3:5) { 
+  x <- all.metric(i, cur.drug)
+
+  
+  boxplot(x, ylab = metric.names[i],
+            main = paste(metric.names[i]," for drug", drug.names[cur.drug]),
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+}
+
+```
+
+## c. Drug AZT
+
+```{r}
+cur.drug = 3
+
+par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
+
+for (i in 3:5) { 
+  x <- all.metric(i, cur.drug)
+
+  
+  boxplot(x, ylab = metric.names[i],
+            main = paste(metric.names[i]," for drug", drug.names[cur.drug]),
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+}
+```
+
+# Drug D4T
+
+```{r}
+cur.drug = 4
+
+par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
+
+for (i in 3:5) { 
+  x <- all.metric(i, cur.drug)
+
+  
+  boxplot(x, ylab = metric.names[i],
+            main = paste(metric.names[i]," for drug", drug.names[cur.drug]),
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+}
+
+```
+
+# Drug DDI
+```{r}
+cur.drug = 5
+
+par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
+
+for (i in 3:5) { 
+  x <- all.metric(i, cur.drug)
+
+  
+  boxplot(x, ylab = metric.names[i],
+            main = paste(metric.names[i]," for drug", drug.names[cur.drug]),
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+}
+
+```
+
+#2. Box plot of metrics for all drugs combined
+
+```{r}
+group.logistic.performance <- sapply(1:5, function(i) rowSums(logistic.performances[, seq(i, 25, by = 5)])) / 5
+
+group.lda.performance <- sapply(1:5, function(i) rowSums(lda.performances[, seq(i, 25, by = 5)])) / 5
+
+group.elastic.performance <- sapply(1:5, function(i) rowSums(elastic.performances[, seq(i, 25, by = 5)])) / 5
+
+group.tree.performance <- sapply(1:5, function(i) rowSums(tree.performances[, seq(i, 25, by = 5)])) / 5
+```
+
+```{r}
+group.metric <- function(metric) {
+  
+  m <- matrix(c(group.logistic.performance[,metric], 
+             group.lda.performance[,metric],
+             group.elastic.performance[,metric],
+             group.tree.performance[,metric]), 
+             ncol=4)
+    
+  colnames(m) <- c("Logist.", "LDA", "Elastic", "Tree")
+  
+  m
+}
+```
+
+```{r}
+par(mfrow = c(1, 3),cex.axis = 1, cex.lab = 1, las = 1)
+
+for (i in 3:5) {
+  x <- group.metric(1)
+
+
+  boxplot(x, ylab = metric.names[i],
+            main = paste("Combined ", metric.names[i]),
+            col = c("lightblue", "lightgreen", "lightcoral", "lightgoldenrodyellow"))
+}
+```
+
+# Hypothesis Testing
+
+We will conduct the Wilcoxon paired test for F1 Scores between LDA and Elastic Nets, Trees
+
+```{r}
+median(group.lda.performance[, 5])
+var(group.lda.performance[, 5])
+```
+
+#Paired with Elastic Nets
+```{r}
+median(group.elastic.performance[, 5])
+var(group.elastic.performance[, 5])
+
+wilcox.test(group.lda.performance[, 5], group.elastic.performance[, 5], paired = T)
+```
+
+#Paired with Trees
+```{r}
+median(group.tree.performance[, 5])
+var(group.tree.performance[, 5])
+
+wilcox.test(group.lda.performance[, 5], group.tree.performance[, 5], paired = T)
+```
+
