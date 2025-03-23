@@ -1,6 +1,6 @@
 This is a project for the Machine Learning course (STAT469) at the University of Victoria (by Dr. Xuekui Zhang)
 
-The purpose of this project is to find out which machine learning model should perform well to determine the chance of DRUG RESISTANCE in HIV treatment.
+The purpose of this project is to find out which machine learning model should perform well to determine the chance of DRUG RESISTANCE in HIV treatments.
 
 I assessed 6 models:
 1. Logistic Regression (with L1 regularization)
